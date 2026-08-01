@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Social Ledger",
+    "slug": "social-ledger",
+    "version": "1.0.0",
+    "scheme": "social-ledger",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#121311",
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#121311"
+      }
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "plugins": [
+      "expo-router"
+    ]
+  }
+}
