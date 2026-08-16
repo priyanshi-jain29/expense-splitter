@@ -18,6 +18,7 @@ const COLORS = {
   muted: "#D0C6AB",
   yellow: "#FFD600",
   yellowInk: "#3A3000",
+  success: "#6DD58C",
   error: "#FFB4AB",
 };
 
@@ -27,37 +28,39 @@ type ExpenseBreakdown = {
 };
 
 type MemberBalance = {
-  id: string;
+  userId: string;
   name: string;
   netAmount: number;
+  direction: "owed_to_you" | "you_owe";
   expenses: ExpenseBreakdown[];
 };
 
-// Positive amounts mean this member owes the logged-in user.
-// Negative amounts mean the logged-in user owes this member.
 const MY_BALANCES: MemberBalance[] = [
   {
-    id: "john",
+    userId: "john",
     name: "John",
     netAmount: 600,
+    direction: "owed_to_you",
     expenses: [
       { purpose: "Scuba Diving", amount: 1200 },
       { purpose: "Petrol", amount: -600 },
     ],
   },
   {
-    id: "priya",
+    userId: "priya",
     name: "Priya",
-    netAmount: -400,
+    netAmount: 400,
+    direction: "you_owe",
     expenses: [
       { purpose: "Beach Shack", amount: 450 },
       { purpose: "Dinner", amount: -850 },
     ],
   },
   {
-    id: "arjun",
+    userId: "arjun",
     name: "Arjun",
     netAmount: 250,
+    direction: "owed_to_you",
     expenses: [
       { purpose: "Airport Cab", amount: 500 },
       { purpose: "Snacks", amount: -250 },
@@ -133,7 +136,7 @@ function BalanceRow({
   onOpenExpense?: (expenseId: string) => void;
   onSettleUp?: () => void;
 }) {
-  const isOwed = member.netAmount > 0;
+  const isOwed = member.direction === "owed_to_you";
 
   return (
     <View style={styles.memberBlock}>
@@ -237,7 +240,7 @@ export default function GroupDetailsScreen({
             <View style={styles.balanceList}>
               {MY_BALANCES.map((member) => (
                 <BalanceRow
-                  key={member.id}
+                  key={member.userId}
                   member={member}
                   onOpenExpense={onOpenExpense}
                   onSettleUp={onSettleUp}
@@ -380,7 +383,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   positive: {
-    color: COLORS.yellow,
+    color: COLORS.success,
   },
   negative: {
     color: COLORS.error,
