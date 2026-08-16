@@ -42,8 +42,12 @@ export default function CreateGroupScreen({ onBack, onCreate }: Props) {
     setError(null);
     try {
       await onCreate(trimmedName);
-    } catch {
-      setError("Unable to create the group. Please try again.");
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unable to create the group. Please try again.",
+      );
       setIsSubmitting(false);
     }
   };

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,6 +12,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { authClient } from "../config/auth-client";
 
 const COLORS = {
   background: "#121311",
@@ -23,6 +25,7 @@ const COLORS = {
   yellow: "#FFD600",
   black: "#10110F",
   white: "#FFFFFF",
+  error: "#FFB4AB",
 };
 
 type FieldProps = {
@@ -157,6 +160,44 @@ export default function AuthScreen({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedName = fullName.trim();
+    if (!normalizedEmail || !password || (isSignup && !normalizedName)) {
+      setError("Please complete all required fields.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const result = isSignup
+        ? await authClient.signUp.email({
+            name: normalizedName,
+            email: normalizedEmail,
+            password,
+          })
+        : await authClient.signIn.email({
+            email: normalizedEmail,
+            password,
+          });
+
+      if (result.error) {
+        setError(result.error.message ?? "Authentication failed.");
+        return;
+      }
+
+      onAuthenticated?.();
+    } catch {
+      setError("Unable to reach the authentication server.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const switchMode = () => {
     if (onSwitchMode) {
@@ -165,6 +206,7 @@ export default function AuthScreen({
     }
     setIsSignup((current) => !current);
     setShowPassword(false);
+    setError(null);
   };
 
   return (
@@ -261,14 +303,27 @@ export default function AuthScreen({
 
               <Pressable
                 accessibilityRole="button"
-                onPress={onAuthenticated}
-                style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}
+                disabled={isSubmitting}
+                onPress={() => void submit()}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  isSubmitting && styles.disabled,
+                  pressed && styles.pressed,
+                ]}
               >
-                <Text style={styles.primaryButtonText}>
-                  {isSignup ? "Create account" : "Log in"}
-                </Text>
-                {isSignup && <Text style={styles.arrow}>→</Text>}
+                {isSubmitting ? (
+                  <ActivityIndicator color={COLORS.black} />
+                ) : (
+                  <>
+                    <Text style={styles.primaryButtonText}>
+                      {isSignup ? "Create account" : "Log in"}
+                    </Text>
+                    {isSignup && <Text style={styles.arrow}>→</Text>}
+                  </>
+                )}
               </Pressable>
+
+              {error && <Text style={styles.errorText}>{error}</Text>}
 
               <View style={styles.dividerRow}>
                 <View style={styles.divider} />
@@ -597,6 +652,16 @@ const styles = StyleSheet.create({
     color: COLORS.black,
     fontSize: 13,
     fontWeight: "600",
+  },
+  disabled: {
+    opacity: 0.65,
+  },
+  errorText: {
+    marginTop: 12,
+    color: COLORS.error,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: "center",
   },
   arrow: {
     color: "#4B4818",

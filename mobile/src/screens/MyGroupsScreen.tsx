@@ -12,7 +12,8 @@ import {
   Text,
   View,
 } from "react-native";
-import { API_BASE_URL, TEST_USER_ID } from "../config/api";
+import { API_BASE_URL } from "../config/api";
+import { authClient } from "../config/auth-client";
 
 const COLORS = {
   background: "#131313",
@@ -134,6 +135,8 @@ export default function MyGroupsScreen({
   onOpenGroup,
   onCreateGroup,
 }: MyGroupsScreenProps) {
+  const { data: session, isPending: isSessionPending } =
+    authClient.useSession();
   const [groups, setGroups] = useState<Group[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -146,10 +149,20 @@ export default function MyGroupsScreen({
         setIsLoading(true);
         setError(null);
 
+        if (isSessionPending) return;
+        const userId = session?.user.id;
+        if (!userId) {
+          setGroups([]);
+          setError("Please log in to view your groups.");
+          setIsLoading(false);
+          return;
+        }
+
         try {
-          const query = new URLSearchParams({ userId: TEST_USER_ID });
+          const query = new URLSearchParams({ userId });
           const response = await fetch(`${API_BASE_URL}/groups?${query}`, {
             signal: controller.signal,
+            credentials: "include",
           });
           if (!response.ok) {
             throw new Error(`Request failed with status ${response.status}`);
@@ -173,7 +186,7 @@ export default function MyGroupsScreen({
 
       void loadGroups();
       return () => controller.abort();
-    }, []),
+    }, [isSessionPending, session?.user.id]),
   );
 
   const renderGroup: ListRenderItem<Group> = ({ item }) => (

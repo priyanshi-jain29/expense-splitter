@@ -13,6 +13,7 @@
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.0.2",
+    "better-auth": "^1.6.29",
     "expo": "54.0.8",
     "expo-constants": "~18.0.13",
     "expo-linking": "~8.0.12",
