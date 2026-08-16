@@ -13,6 +13,9 @@ export default function GroupDetailsRoute() {
       onAddExpense={() => router.push(`/groups/${currentGroupId}/add-expense`)}
       onAddMembers={() => router.push(`/groups/${currentGroupId}/add-members`)}
       onBack={() => router.replace("/groups")}
+      onOpenExpense={(expenseId) =>
+        router.push(`/groups/${currentGroupId}/expenses/${expenseId}`)
+      }
       onSettleUp={(memberId) =>
         router.push(
           `/groups/${currentGroupId}/settle-up?memberId=${encodeURIComponent(memberId)}`,

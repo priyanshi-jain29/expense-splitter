@@ -31,6 +31,11 @@ type MemberBalance = {
   name: string;
   netAmount: number;
   direction: "owed_to_you" | "you_owe";
+  expenses: Array<{
+    expenseId: string;
+    description: string;
+    amount: number;
+  }>;
 };
 
 const rupees = (amount: number) =>
@@ -80,9 +85,11 @@ function Header({
 
 function BalanceRow({
   member,
+  onOpenExpense,
   onSettleUp,
 }: {
   member: MemberBalance;
+  onOpenExpense?: (expenseId: string) => void;
   onSettleUp?: (memberId: string) => void;
 }) {
   const isOwed = member.direction === "owed_to_you";
@@ -103,6 +110,35 @@ function BalanceRow({
           {rupees(member.netAmount)}
         </Text>
       </Pressable>
+
+      {member.expenses.length > 0 ? (
+        <View style={styles.breakdown}>
+          {member.expenses.map((expense) => (
+            <Pressable
+              key={expense.expenseId}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${expense.description} expense`}
+              onPress={() => onOpenExpense?.(expense.expenseId)}
+              style={({ pressed }) => [
+                styles.expenseRow,
+                pressed && styles.expenseRowPressed,
+              ]}
+            >
+              <Text numberOfLines={1} style={styles.expensePurpose}>
+                {expense.description}
+              </Text>
+              <Text
+                style={[
+                  styles.expenseAmount,
+                  expense.amount >= 0 ? styles.positive : styles.negative,
+                ]}
+              >
+                {expense.amount >= 0 ? "+" : "-"}₹{rupees(expense.amount)}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -138,6 +174,7 @@ type GroupDetailsScreenProps = {
   onBack?: () => void;
   onAddMembers?: () => void;
   onAddExpense?: () => void;
+  onOpenExpense?: (expenseId: string) => void;
   onSettleUp?: (memberId: string) => void;
 };
 
@@ -146,6 +183,7 @@ export default function GroupDetailsScreen({
   onBack,
   onAddMembers,
   onAddExpense,
+  onOpenExpense,
   onSettleUp,
 }: GroupDetailsScreenProps) {
   const { data: session, isPending: isSessionPending } =
@@ -238,6 +276,7 @@ export default function GroupDetailsScreen({
                   <BalanceRow
                     key={member.userId}
                     member={member}
+                    onOpenExpense={onOpenExpense}
                     onSettleUp={onSettleUp}
                   />
                 ))}
@@ -374,6 +413,37 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
     fontWeight: "700",
+  },
+  breakdown: {
+    marginTop: 8,
+    paddingTop: 10,
+    paddingHorizontal: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "rgba(77, 70, 50, 0.42)",
+    rowGap: 4,
+  },
+  expenseRow: {
+    minHeight: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    columnGap: 12,
+  },
+  expenseRowPressed: {
+    opacity: 0.65,
+  },
+  expensePurpose: {
+    flex: 1,
+    color: COLORS.muted,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "500",
+  },
+  expenseAmount: {
+    textAlign: "right",
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "600",
   },
   positive: {
     color: COLORS.success,

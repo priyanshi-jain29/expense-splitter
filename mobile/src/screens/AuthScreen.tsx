@@ -100,17 +100,23 @@ function FormField({
   keyboardType = "default",
   textContentType,
 }: FieldProps) {
+  const [isFocused, setIsFocused] = useState(false);
+
   return (
     <View style={styles.fieldGroup}>
       <View style={styles.fieldLabelRow}>
         <Text style={styles.fieldLabel}>{label}</Text>
         {rightAccessory}
       </View>
-      <View style={styles.inputShell}>
+      <View
+        style={[styles.inputShell, isFocused && styles.inputShellFocused]}
+      >
         <FieldIcon type={icon} />
         <TextInput
           value={value}
           onChangeText={onChangeText}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
           placeholder={placeholder}
           placeholderTextColor="#6F706B"
           style={styles.input}
@@ -523,19 +529,29 @@ const styles = StyleSheet.create({
   },
   inputShell: {
     height: 49,
+    borderWidth: 1,
+    borderColor: "transparent",
     borderRadius: 8,
     backgroundColor: COLORS.input,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 14,
   },
+  inputShellFocused: {
+    borderColor: COLORS.white,
+  },
   input: {
     flex: 1,
     height: "100%",
+    minWidth: 0,
     color: COLORS.text,
     fontSize: 13,
     paddingHorizontal: 13,
     paddingVertical: 0,
+    borderWidth: 0,
+    outlineWidth: 0,
+    outlineStyle: "solid",
+    outlineColor: "transparent",
   },
   mailIcon: {
     width: 16,

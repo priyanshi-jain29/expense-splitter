@@ -4,13 +4,16 @@ import ExpenseDetailScreen from "../../../../../src/screens/ExpenseDetailScreen"
 
 export default function ExpenseDetailRoute() {
   const router = useRouter();
-  const { groupId } = useLocalSearchParams<{ groupId: string }>();
+  const { groupId, expenseId } = useLocalSearchParams<{
+    groupId: string;
+    expenseId: string;
+  }>();
 
   return (
     <ExpenseDetailScreen
+      expenseId={expenseId ?? ""}
       onBack={() => router.back()}
-      onDelete={() => router.back()}
-      onEdit={() => router.push(`/groups/${groupId ?? "goa"}/add-expense`)}
+      onDeleted={() => router.replace(`/groups/${groupId ?? ""}`)}
     />
   );
 }

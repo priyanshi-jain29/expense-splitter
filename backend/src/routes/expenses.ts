@@ -109,8 +109,18 @@ router.get("/:expenseId", async (request, response, next) => {
 
   try {
     const [expense] = await db
-      .select()
+      .select({
+        id: expenses.id,
+        groupId: expenses.groupId,
+        paidBy: expenses.paidBy,
+        payerName: users.name,
+        amount: expenses.amount,
+        description: expenses.description,
+        splitType: expenses.splitType,
+        createdAt: expenses.createdAt,
+      })
       .from(expenses)
+      .innerJoin(users, eq(users.id, expenses.paidBy))
       .where(eq(expenses.id, expenseId))
       .limit(1);
 

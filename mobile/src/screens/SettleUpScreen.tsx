@@ -557,6 +557,10 @@ const styles = StyleSheet.create({
     lineHeight: 50,
     fontWeight: "800",
     letterSpacing: -1,
+    borderWidth: 0,
+    outlineWidth: 0,
+    outlineStyle: "solid",
+    outlineColor: "transparent",
   },
   amountUnderline: {
     width: 64,

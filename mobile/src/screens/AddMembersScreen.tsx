@@ -121,6 +121,9 @@ export default function AddMembersScreen({
   const [isSearching, setIsSearching] = useState(false);
   const [addingUserId, setAddingUserId] = useState<string | null>(null);
   const [isAddingPlaceholder, setIsAddingPlaceholder] = useState(false);
+  const [focusedInput, setFocusedInput] = useState<"search" | "name" | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   useFocusEffect(
@@ -324,7 +327,12 @@ export default function AddMembersScreen({
             contentContainerStyle={styles.content}
             ListHeaderComponent={
               <>
-                <View style={styles.searchBox}>
+                <View
+                  style={[
+                    styles.searchBox,
+                    focusedInput === "search" && styles.inputBoxFocused,
+                  ]}
+                >
                   <MaterialIcons
                     name="search"
                     size={21}
@@ -335,6 +343,8 @@ export default function AddMembersScreen({
                     autoCapitalize="none"
                     autoCorrect={false}
                     onChangeText={setQuery}
+                    onFocus={() => setFocusedInput("search")}
+                    onBlur={() => setFocusedInput(null)}
                     placeholder="Search by name or email"
                     placeholderTextColor={COLORS.muted}
                     style={styles.searchInput}
@@ -368,11 +378,16 @@ export default function AddMembersScreen({
                   <TextInput
                     accessibilityLabel="Full name"
                     onChangeText={setNewMemberName}
+                    onFocus={() => setFocusedInput("name")}
+                    onBlur={() => setFocusedInput(null)}
                     onSubmitEditing={addPlaceholderMember}
                     placeholder="Enter name"
                     placeholderTextColor={COLORS.muted}
                     returnKeyType="done"
-                    style={styles.nameInput}
+                    style={[
+                      styles.nameInput,
+                      focusedInput === "name" && styles.inputBoxFocused,
+                    ]}
                     value={newMemberName}
                   />
                   <Pressable
@@ -514,9 +529,17 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
+    minWidth: 0,
     color: COLORS.text,
     fontSize: 14,
     paddingVertical: 0,
+    borderWidth: 0,
+    outlineWidth: 0,
+    outlineStyle: "solid",
+    outlineColor: "transparent",
+  },
+  inputBoxFocused: {
+    borderColor: COLORS.text,
   },
   sectionLabel: {
     color: COLORS.muted,
@@ -586,6 +609,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.surfaceHighest,
     borderRadius: 6,
+    outlineWidth: 0,
+    outlineStyle: "solid",
+    outlineColor: "transparent",
   },
   addMemberButton: {
     minHeight: 44,

@@ -282,8 +282,11 @@ router.get("/:groupId/balances", async (request, response, next) => {
           ),
         db
           .select({
+            expenseId: expenses.id,
+            description: expenses.description,
             userId: expenseShares.userId,
             amount: expenseShares.shareAmount,
+            createdAt: expenses.createdAt,
           })
           .from(expenses)
           .innerJoin(expenseShares, eq(expenseShares.expenseId, expenses.id))
@@ -296,8 +299,11 @@ router.get("/:groupId/balances", async (request, response, next) => {
           ),
         db
           .select({
+            expenseId: expenses.id,
+            description: expenses.description,
             userId: expenses.paidBy,
             amount: expenseShares.shareAmount,
+            createdAt: expenses.createdAt,
           })
           .from(expenses)
           .innerJoin(expenseShares, eq(expenseShares.expenseId, expenses.id))
@@ -319,6 +325,15 @@ router.get("/:groupId/balances", async (request, response, next) => {
       ]);
 
     const netByUser = new Map(members.map((member) => [member.userId, 0]));
+    const expensesByUser = new Map<
+      string,
+      Array<{
+        expenseId: string;
+        description: string;
+        amount: number;
+        createdAt: Date;
+      }>
+    >(members.map((member) => [member.userId, []]));
     const adjustNet = (memberId: string, amount: number) => {
       if (netByUser.has(memberId)) {
         netByUser.set(memberId, netByUser.get(memberId)! + amount);
@@ -327,9 +342,21 @@ router.get("/:groupId/balances", async (request, response, next) => {
 
     for (const share of owedToUser) {
       adjustNet(share.userId, Number(share.amount));
+      expensesByUser.get(share.userId)?.push({
+        expenseId: share.expenseId,
+        description: share.description,
+        amount: Number(share.amount),
+        createdAt: share.createdAt,
+      });
     }
     for (const share of owedByUser) {
       adjustNet(share.userId, -Number(share.amount));
+      expensesByUser.get(share.userId)?.push({
+        expenseId: share.expenseId,
+        description: share.description,
+        amount: -Number(share.amount),
+        createdAt: share.createdAt,
+      });
     }
     for (const settlement of groupSettlements) {
       if (settlement.fromUser === userId) {
@@ -345,6 +372,12 @@ router.get("/:groupId/balances", async (request, response, next) => {
         ...member,
         netAmount: Number(Math.abs(signedNet).toFixed(2)),
         direction: signedNet >= 0 ? "owed_to_you" : "you_owe",
+        expenses: (expensesByUser.get(member.userId) ?? [])
+          .sort(
+            (first, second) =>
+              second.createdAt.getTime() - first.createdAt.getTime(),
+          )
+          .map(({ createdAt: _createdAt, ...expense }) => expense),
       };
     });
 

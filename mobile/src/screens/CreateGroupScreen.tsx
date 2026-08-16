@@ -32,6 +32,7 @@ type Props = {
 export default function CreateGroupScreen({ onBack, onCreate }: Props) {
   const [name, setName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isNameFocused, setIsNameFocused] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleCreate = async () => {
@@ -82,12 +83,14 @@ export default function CreateGroupScreen({ onBack, onCreate }: Props) {
               accessibilityLabel="Group name"
               autoFocus
               onChangeText={setName}
+              onFocus={() => setIsNameFocused(true)}
+              onBlur={() => setIsNameFocused(false)}
               placeholder="e.g. Trip to Goa"
               placeholderTextColor={COLORS.muted}
               returnKeyType="done"
               editable={!isSubmitting}
               onSubmitEditing={() => void handleCreate()}
-              style={styles.input}
+              style={[styles.input, isNameFocused && styles.inputFocused]}
               value={name}
             />
             <Text style={styles.hint}>
@@ -164,6 +167,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: 10,
+    outlineWidth: 0,
+    outlineStyle: "solid",
+    outlineColor: "transparent",
+  },
+  inputFocused: {
+    borderColor: COLORS.text,
   },
   hint: { color: COLORS.muted, fontSize: 12, marginTop: 10 },
   createButton: {

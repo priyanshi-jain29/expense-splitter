@@ -141,37 +141,37 @@ function MemberCard({
   onExactAmountChange: (value: string) => void;
   onToggle: () => void;
 }) {
-  return (
-    <Pressable
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: selected }}
-      accessibilityLabel={`${member.name}, ${member.role}`}
-      onPress={onToggle}
-      style={({ pressed }) => [
-        styles.memberCard,
-        pressed && styles.memberCardPressed,
-      ]}
-    >
-      <View
-        style={[
-          styles.avatar,
-          member.isHost ? styles.hostAvatar : styles.memberAvatar,
-        ]}
-      >
-        <MaterialIcons
-          name="person"
-          size={22}
-          color={member.isHost ? COLORS.yellow : COLORS.secondary}
-        />
-      </View>
+  const [isExactFocused, setIsExactFocused] = useState(false);
 
-      <View style={styles.memberCopy}>
-        <Text style={styles.memberName}>{member.name}</Text>
-        <Text style={styles.memberRole}>{member.role}</Text>
+  return (
+    <View style={styles.memberCard}>
+      <View style={styles.memberIdentity}>
+        <View
+          style={[
+            styles.avatar,
+            member.isHost ? styles.hostAvatar : styles.memberAvatar,
+          ]}
+        >
+          <MaterialIcons
+            name="person"
+            size={22}
+            color={member.isHost ? COLORS.yellow : COLORS.secondary}
+          />
+        </View>
+
+        <View style={styles.memberCopy}>
+          <Text style={styles.memberName}>{member.name}</Text>
+          <Text style={styles.memberRole}>{member.role}</Text>
+        </View>
       </View>
 
       {showExactAmount ? (
-        <View style={styles.exactAmountShell}>
+        <View
+          style={[
+            styles.exactAmountShell,
+            isExactFocused && styles.inputShellFocused,
+          ]}
+        >
           <Text style={styles.exactCurrency}>₹</Text>
           <TextInput
             accessibilityLabel={`${member.name}'s exact share`}
@@ -179,7 +179,8 @@ function MemberCard({
             onChangeText={(value) =>
               onExactAmountChange(value.replace(/[^0-9.]/g, ""))
             }
-            onPressIn={(event) => event.stopPropagation()}
+            onFocus={() => setIsExactFocused(true)}
+            onBlur={() => setIsExactFocused(false)}
             placeholder="0.00"
             placeholderTextColor={COLORS.outline}
             keyboardType="decimal-pad"
@@ -189,12 +190,21 @@ function MemberCard({
         </View>
       ) : null}
 
-      <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
-        {selected && (
-          <MaterialIcons name="check" size={17} color={COLORS.yellowInk} />
-        )}
-      </View>
-    </Pressable>
+      <Pressable
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: selected }}
+        accessibilityLabel={`${selected ? "Remove" : "Add"} ${member.name} from split`}
+        hitSlop={6}
+        onPress={onToggle}
+        style={styles.checkboxButton}
+      >
+        <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
+          {selected && (
+            <MaterialIcons name="check" size={17} color={COLORS.yellowInk} />
+          )}
+        </View>
+      </Pressable>
+    </View>
   );
 }
 
@@ -250,6 +260,7 @@ export default function AddExpenseScreen({
   const [exactAmounts, setExactAmounts] = useState<Record<string, string>>({});
   const [isLoadingMembers, setIsLoadingMembers] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDescriptionFocused, setIsDescriptionFocused] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useFocusEffect(
@@ -475,7 +486,12 @@ export default function AddExpenseScreen({
               </View>
             </View>
 
-            <View style={styles.descriptionShell}>
+            <View
+              style={[
+                styles.descriptionShell,
+                isDescriptionFocused && styles.inputShellFocused,
+              ]}
+            >
               <MaterialIcons
                 name="description"
                 size={21}
@@ -485,6 +501,8 @@ export default function AddExpenseScreen({
                 accessibilityLabel="Expense description, required"
                 value={description}
                 onChangeText={setDescription}
+                onFocus={() => setIsDescriptionFocused(true)}
+                onBlur={() => setIsDescriptionFocused(false)}
                 placeholder="What was this for? *"
                 placeholderTextColor={COLORS.outline}
                 selectionColor={COLORS.yellow}
@@ -653,6 +671,10 @@ const styles = StyleSheet.create({
     lineHeight: 44,
     fontWeight: "800",
     letterSpacing: -0.8,
+    borderWidth: 0,
+    outlineWidth: 0,
+    outlineStyle: "solid",
+    outlineColor: "transparent",
   },
   descriptionShell: {
     height: 54,
@@ -668,12 +690,17 @@ const styles = StyleSheet.create({
   },
   descriptionInput: {
     flex: 1,
+    minWidth: 0,
     height: "100%",
     padding: 0,
     color: COLORS.text,
     fontSize: 13,
     lineHeight: 20,
     fontWeight: "500",
+    borderWidth: 0,
+    outlineWidth: 0,
+    outlineStyle: "solid",
+    outlineColor: "transparent",
   },
   splitSection: {
     marginTop: 16,
@@ -749,9 +776,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
-  memberCardPressed: {
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surfaceHigh,
+  memberIdentity: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
   },
   avatar: {
     width: 40,
@@ -795,18 +824,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  checkboxButton: {
+    width: 34,
+    height: 40,
+    alignItems: "flex-end",
+    justifyContent: "center",
+  },
   checkboxSelected: {
     borderColor: COLORS.yellow,
     backgroundColor: COLORS.yellow,
   },
   exactAmountShell: {
-    width: 94,
+    width: 112,
     height: 38,
-    marginRight: 10,
+    marginRight: 6,
     paddingHorizontal: 8,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.outline,
     borderRadius: 6,
+    overflow: "hidden",
     flexDirection: "row",
     alignItems: "center",
   },
@@ -816,11 +852,20 @@ const styles = StyleSheet.create({
   },
   exactAmountInput: {
     flex: 1,
+    width: 0,
+    minWidth: 0,
     height: 36,
     padding: 0,
+    borderWidth: 0,
+    outlineWidth: 0,
+    outlineStyle: "solid",
+    outlineColor: "transparent",
     color: COLORS.text,
     textAlign: "right",
     fontSize: 12,
+  },
+  inputShellFocused: {
+    borderColor: COLORS.text,
   },
   memberLoadingState: {
     minHeight: 120,
@@ -837,7 +882,7 @@ const styles = StyleSheet.create({
   fixedAction: {
     position: "absolute",
     right: 0,
-    bottom: 64,
+    bottom: 0,
     left: 0,
     paddingHorizontal: 16,
     paddingTop: 16,
