@@ -1,6 +1,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -20,15 +21,32 @@ const COLORS = {
   muted: "#D0C6AB",
   yellow: "#FFD600",
   yellowInk: "#221B00",
+  error: "#FFB4AB",
 };
 
 type Props = {
   onBack?: () => void;
-  onCreate?: () => void;
+  onCreate?: (name: string) => Promise<void>;
 };
 
 export default function CreateGroupScreen({ onBack, onCreate }: Props) {
   const [name, setName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCreate = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName || isSubmitting || !onCreate) return;
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await onCreate(trimmedName);
+    } catch {
+      setError("Unable to create the group. Please try again.");
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <View style={styles.screen}>
@@ -63,6 +81,8 @@ export default function CreateGroupScreen({ onBack, onCreate }: Props) {
               placeholder="e.g. Trip to Goa"
               placeholderTextColor={COLORS.muted}
               returnKeyType="done"
+              editable={!isSubmitting}
+              onSubmitEditing={() => void handleCreate()}
               style={styles.input}
               value={name}
             />
@@ -72,16 +92,21 @@ export default function CreateGroupScreen({ onBack, onCreate }: Props) {
 
             <Pressable
               accessibilityRole="button"
-              disabled={!name.trim()}
-              onPress={onCreate}
+              disabled={!name.trim() || isSubmitting}
+              onPress={() => void handleCreate()}
               style={({ pressed }) => [
                 styles.createButton,
-                !name.trim() && styles.disabled,
+                (!name.trim() || isSubmitting) && styles.disabled,
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={styles.createButtonText}>Create Group</Text>
+              {isSubmitting ? (
+                <ActivityIndicator color={COLORS.yellowInk} />
+              ) : (
+                <Text style={styles.createButtonText}>Create Group</Text>
+              )}
             </Pressable>
+            {error && <Text style={styles.errorText}>{error}</Text>}
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -149,6 +174,12 @@ const styles = StyleSheet.create({
     color: COLORS.yellowInk,
     fontSize: 16,
     fontWeight: "800",
+  },
+  errorText: {
+    marginTop: 12,
+    color: COLORS.error,
+    fontSize: 13,
+    textAlign: "center",
   },
   disabled: { opacity: 0.5 },
   pressed: { opacity: 0.8, transform: [{ scale: 0.98 }] },

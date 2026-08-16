@@ -1,6 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import React from "react";
+import { useFocusEffect } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   ListRenderItem,
   Pressable,
@@ -10,6 +12,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { API_BASE_URL, TEST_USER_ID } from "../config/api";
 
 const COLORS = {
   background: "#131313",
@@ -26,82 +29,10 @@ const COLORS = {
   secondaryText: "#B7B5B4",
 };
 
-type BalanceTone = "positive" | "negative" | "settled";
-
 type Group = {
   id: string;
   name: string;
-  members: string[];
-  lastActivity: string;
-  balance: string;
-  balanceTone: BalanceTone;
 };
-
-const GROUPS: Group[] = [
-  {
-    id: "goa",
-    name: "Trip to Goa",
-    members: ["JD", "AS", "+2"],
-    lastActivity: "Last activity 2h ago",
-    balance: "You are owed ₹500",
-    balanceTone: "positive",
-  },
-  {
-    id: "apartment",
-    name: "Apartment Expenses",
-    members: ["RK", "ML"],
-    lastActivity: "Last activity Yesterday",
-    balance: "You owe ₹200",
-    balanceTone: "negative",
-  },
-  {
-    id: "dinner",
-    name: "Dinner Out",
-    members: ["SK", "PV", "+5"],
-    lastActivity: "Settled 3 days ago",
-    balance: "All settled up",
-    balanceTone: "settled",
-  },
-  {
-    id: "rent",
-    name: "House Rent",
-    members: ["AM", "BT"],
-    lastActivity: "No recent activity",
-    balance: "You owe ₹50",
-    balanceTone: "negative",
-  },
-];
-
-function MemberAvatars({ members }: { members: string[] }) {
-  return (
-    <View style={styles.avatarRow}>
-      {members.map((member, index) => (
-        <View
-          key={`${member}-${index}`}
-          style={[
-            styles.avatar,
-            index === 0
-              ? styles.avatarPrimary
-              : index === 1
-                ? styles.avatarSecondary
-                : styles.avatarMore,
-            index > 0 && styles.avatarOverlap,
-          ]}
-        >
-          <Text
-            style={[
-              styles.avatarText,
-              index === 0 && styles.avatarPrimaryText,
-              index === 1 && styles.avatarSecondaryText,
-            ]}
-          >
-            {member}
-          </Text>
-        </View>
-      ))}
-    </View>
-  );
-}
 
 function GroupCard({
   group,
@@ -110,48 +41,29 @@ function GroupCard({
   group: Group;
   onPress?: (groupId: string) => void;
 }) {
-  const statusStyle =
-    group.balanceTone === "positive"
-      ? styles.positiveBalance
-      : group.balanceTone === "settled"
-        ? styles.settledBalance
-        : styles.negativeBalance;
-
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${group.name}. ${group.balance}`}
+      accessibilityLabel={`Open ${group.name}`}
       onPress={() => onPress?.(group.id)}
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
     >
       <Text style={styles.groupName}>{group.name}</Text>
-      <MemberAvatars members={group.members} />
-
       <View style={styles.cardDivider} />
       <View style={styles.cardFooter}>
-        <Text style={styles.activityText}>{group.lastActivity}</Text>
-        <Text style={[styles.balanceText, statusStyle]}>{group.balance}</Text>
+        <Text style={styles.activityText}>View group details</Text>
+        <MaterialIcons name="chevron-right" size={20} color={COLORS.muted} />
       </View>
     </Pressable>
   );
 }
 
-function DashboardHeader() {
+function DashboardHeader({ groupCount }: { groupCount: number }) {
   return (
-    <>
-      <View style={styles.balanceSummary}>
-        <Text style={styles.balanceLabel}>TOTAL BALANCE</Text>
-        <View style={styles.balanceValueRow}>
-          <Text style={styles.totalBalance}>₹300</Text>
-          <Text style={styles.owedLabel}>Owed to you</Text>
-        </View>
-      </View>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>My Groups</Text>
-        <Text style={styles.activeCount}>4 Active</Text>
-      </View>
-    </>
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionTitle}>My Groups</Text>
+      <Text style={styles.activeCount}>{groupCount} Active</Text>
+    </View>
   );
 }
 
@@ -222,6 +134,48 @@ export default function MyGroupsScreen({
   onOpenGroup,
   onCreateGroup,
 }: MyGroupsScreenProps) {
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      const controller = new AbortController();
+
+      async function loadGroups() {
+        setIsLoading(true);
+        setError(null);
+
+        try {
+          const query = new URLSearchParams({ userId: TEST_USER_ID });
+          const response = await fetch(`${API_BASE_URL}/groups?${query}`, {
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`);
+          }
+
+          const data = (await response.json()) as Group[];
+          setGroups(data);
+        } catch (requestError) {
+          if (
+            requestError instanceof Error &&
+            requestError.name !== "AbortError"
+          ) {
+            setError("Unable to load groups. Check that the backend is running.");
+          }
+        } finally {
+          if (!controller.signal.aborted) {
+            setIsLoading(false);
+          }
+        }
+      }
+
+      void loadGroups();
+      return () => controller.abort();
+    }, []),
+  );
+
   const renderGroup: ListRenderItem<Group> = ({ item }) => (
     <GroupCard group={item} onPress={onOpenGroup} />
   );
@@ -235,10 +189,24 @@ export default function MyGroupsScreen({
         <View style={styles.contentColumn}>
           <TopBar />
           <FlatList
-            data={GROUPS}
+            data={groups}
             keyExtractor={(item) => item.id}
             renderItem={renderGroup}
-            ListHeaderComponent={DashboardHeader}
+            ListHeaderComponent={<DashboardHeader groupCount={groups.length} />}
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                {isLoading ? (
+                  <>
+                    <ActivityIndicator color={COLORS.yellow} size="large" />
+                    <Text style={styles.emptyText}>Loading groups…</Text>
+                  </>
+                ) : (
+                  <Text style={[styles.emptyText, error && styles.errorText]}>
+                    {error ?? "You don't belong to any groups yet."}
+                  </Text>
+                )}
+              </View>
+            }
             contentContainerStyle={styles.listContent}
             ItemSeparatorComponent={() => <View style={styles.cardGap} />}
             showsVerticalScrollIndicator={false}
@@ -312,6 +280,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 20,
     paddingBottom: 150,
+  },
+  emptyState: {
+    minHeight: 180,
+    alignItems: "center",
+    justifyContent: "center",
+    rowGap: 14,
+  },
+  emptyText: {
+    color: COLORS.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+  errorText: {
+    color: "#FFB4AB",
   },
   balanceSummary: {
     paddingHorizontal: 8,
