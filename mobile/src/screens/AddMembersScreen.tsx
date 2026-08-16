@@ -1,6 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import React, { useMemo, useState } from "react";
+import { useFocusEffect } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -12,6 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { API_BASE_URL } from "../config/api";
 
 const COLORS = {
   background: "#131313",
@@ -31,41 +34,24 @@ const COLORS = {
 type RegisteredUser = {
   id: string;
   name: string;
-  email: string;
-  initials: string;
+  email: string | null;
 };
 
 type Member = {
   id: string;
   name: string;
+  is_placeholder: boolean;
   status: "Registered" | "Pending";
 };
 
-const USERS: RegisteredUser[] = [
-  {
-    id: "john",
-    name: "John Doe",
-    email: "john.doe@example.com",
-    initials: "JD",
-  },
-  {
-    id: "ananya",
-    name: "Ananya Shah",
-    email: "ananya.shah@example.com",
-    initials: "AS",
-  },
-  {
-    id: "michael",
-    name: "Michael Chen",
-    email: "michael.chen@example.com",
-    initials: "MC",
-  },
-];
+type ApiMember = Pick<Member, "id" | "name" | "is_placeholder">;
 
-const INITIAL_MEMBERS: Member[] = [
-  { id: "priya", name: "Priya", status: "Registered" },
-  { id: "rahul", name: "Rahul", status: "Pending" },
-];
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
 
 function Header({ onBack }: { onBack?: () => void }) {
   return (
@@ -117,44 +103,168 @@ function BottomNavigation() {
 }
 
 type AddMembersScreenProps = {
+  groupId: string;
   onBack?: () => void;
   onDone?: () => void;
 };
 
 export default function AddMembersScreen({
+  groupId,
   onBack,
   onDone,
 }: AddMembersScreenProps) {
   const [query, setQuery] = useState("");
   const [newMemberName, setNewMemberName] = useState("");
-  const [members, setMembers] = useState<Member[]>(INITIAL_MEMBERS);
+  const [results, setResults] = useState<RegisteredUser[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [isLoadingMembers, setIsLoadingMembers] = useState(true);
+  const [isSearching, setIsSearching] = useState(false);
+  const [addingUserId, setAddingUserId] = useState<string | null>(null);
+  const [isAddingPlaceholder, setIsAddingPlaceholder] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const results = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    if (!normalized) return USERS;
-    return USERS.filter(
-      (user) =>
-        user.name.toLowerCase().includes(normalized) ||
-        user.email.toLowerCase().includes(normalized),
-    );
+  useFocusEffect(
+    useCallback(() => {
+      const controller = new AbortController();
+
+      async function loadMembers() {
+        setIsLoadingMembers(true);
+        setError(null);
+        try {
+          const response = await fetch(
+            `${API_BASE_URL}/groups/${groupId}/members`,
+            { signal: controller.signal, credentials: "include" },
+          );
+          if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`);
+          }
+
+          const data = (await response.json()) as ApiMember[];
+          setMembers(
+            data.map((member) => ({
+              ...member,
+              status: member.is_placeholder ? "Pending" : "Registered",
+            })),
+          );
+        } catch (requestError) {
+          if (
+            requestError instanceof Error &&
+            requestError.name !== "AbortError"
+          ) {
+            setError("Unable to load group members.");
+          }
+        } finally {
+          if (!controller.signal.aborted) setIsLoadingMembers(false);
+        }
+      }
+
+      void loadMembers();
+      return () => controller.abort();
+    }, [groupId]),
+  );
+
+  useEffect(() => {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      setResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      async function searchUsers() {
+        setIsSearching(true);
+        setError(null);
+        try {
+          const search = new URLSearchParams({ query: normalizedQuery });
+          const response = await fetch(`${API_BASE_URL}/users/search?${search}`, {
+            signal: controller.signal,
+            credentials: "include",
+          });
+          if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`);
+          }
+          setResults((await response.json()) as RegisteredUser[]);
+        } catch (requestError) {
+          if (
+            requestError instanceof Error &&
+            requestError.name !== "AbortError"
+          ) {
+            setError("Unable to search for users.");
+          }
+        } finally {
+          if (!controller.signal.aborted) setIsSearching(false);
+        }
+      }
+
+      void searchUsers();
+    }, 300);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [query]);
 
-  const addRegisteredUser = (user: RegisteredUser) => {
-    if (members.some((member) => member.id === user.id)) return;
-    setMembers((current) => [
-      ...current,
-      { id: user.id, name: user.name, status: "Registered" },
-    ]);
+  const addMember = async (body: { userId: string } | { name: string }) => {
+    const response = await fetch(`${API_BASE_URL}/groups/${groupId}/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const responseBody = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      throw new Error(responseBody?.error ?? "Unable to add member.");
+    }
+    return (await response.json()) as ApiMember;
   };
 
-  const addPlaceholderMember = () => {
+  const addRegisteredUser = async (user: RegisteredUser) => {
+    if (members.some((member) => member.id === user.id) || addingUserId) return;
+    setAddingUserId(user.id);
+    setError(null);
+    try {
+      const member = await addMember({ userId: user.id });
+      setMembers((current) => [
+        ...current,
+        { ...member, status: "Registered" },
+      ]);
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unable to add member.",
+      );
+    } finally {
+      setAddingUserId(null);
+    }
+  };
+
+  const addPlaceholderMember = async () => {
     const name = newMemberName.trim();
-    if (!name) return;
-    setMembers((current) => [
-      ...current,
-      { id: `pending-${Date.now()}`, name, status: "Pending" },
-    ]);
-    setNewMemberName("");
+    if (!name || isAddingPlaceholder) return;
+    setIsAddingPlaceholder(true);
+    setError(null);
+    try {
+      const member = await addMember({ name });
+      setMembers((current) => [
+        ...current,
+        { ...member, status: "Pending" },
+      ]);
+      setNewMemberName("");
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unable to add member.",
+      );
+    } finally {
+      setIsAddingPlaceholder(false);
+    }
   };
 
   const renderResult = ({ item }: { item: RegisteredUser }) => {
@@ -163,20 +273,20 @@ export default function AddMembersScreen({
       <View style={styles.resultCard}>
         <View style={styles.personInfo}>
           <View style={styles.resultAvatar}>
-            <Text style={styles.resultAvatarText}>{item.initials}</Text>
+            <Text style={styles.resultAvatarText}>{initials(item.name)}</Text>
           </View>
           <View style={styles.personCopy}>
             <Text style={styles.personName}>{item.name}</Text>
             <Text style={styles.personEmail} numberOfLines={1}>
-              {item.email}
+              {item.email ?? "No email available"}
             </Text>
           </View>
         </View>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Add ${item.name}`}
-          disabled={alreadyAdded}
-          onPress={() => addRegisteredUser(item)}
+          disabled={alreadyAdded || addingUserId !== null}
+          onPress={() => void addRegisteredUser(item)}
           style={({ pressed }) => [
             styles.addButton,
             alreadyAdded && styles.addButtonDisabled,
@@ -184,7 +294,11 @@ export default function AddMembersScreen({
           ]}
         >
           <Text style={styles.addButtonText}>
-            {alreadyAdded ? "Added" : "Add"}
+            {alreadyAdded
+              ? "Added"
+              : addingUserId === item.id
+                ? "Adding…"
+                : "Add"}
           </Text>
         </Pressable>
       </View>
@@ -231,7 +345,18 @@ export default function AddMembersScreen({
               </>
             }
             ListEmptyComponent={
-              <Text style={styles.emptyResult}>No registered users match.</Text>
+              isSearching ? (
+                <ActivityIndicator
+                  color={COLORS.yellow}
+                  style={styles.searchSpinner}
+                />
+              ) : (
+                <Text style={styles.emptyResult}>
+                  {query.trim()
+                    ? "No registered users match."
+                    : "Enter a name or email to search."}
+                </Text>
+              )
             }
             ListFooterComponent={
               <>
@@ -252,11 +377,12 @@ export default function AddMembersScreen({
                   />
                   <Pressable
                     accessibilityRole="button"
-                    disabled={!newMemberName.trim()}
-                    onPress={addPlaceholderMember}
+                    disabled={!newMemberName.trim() || isAddingPlaceholder}
+                    onPress={() => void addPlaceholderMember()}
                     style={({ pressed }) => [
                       styles.addMemberButton,
-                      !newMemberName.trim() && styles.buttonDisabled,
+                      (!newMemberName.trim() || isAddingPlaceholder) &&
+                        styles.buttonDisabled,
                       pressed && styles.pressed,
                     ]}
                   >
@@ -266,7 +392,9 @@ export default function AddMembersScreen({
                       color={COLORS.yellowInk}
                     />
                     <Text style={styles.addMemberButtonText}>
-                      {newMemberName.trim()
+                      {isAddingPlaceholder
+                        ? "Adding…"
+                        : newMemberName.trim()
                         ? `Add ${newMemberName.trim()} as Member`
                         : "Add as Member"}
                     </Text>
@@ -277,47 +405,57 @@ export default function AddMembersScreen({
                   <Text style={styles.sectionLabel}>ADDED MEMBERS</Text>
                   <Text style={styles.totalBadge}>{members.length} total</Text>
                 </View>
-                {members.map((member) => (
-                  <View key={member.id} style={styles.memberRow}>
-                    <View style={styles.memberIdentity}>
+                {error && <Text style={styles.errorText}>{error}</Text>}
+                {isLoadingMembers ? (
+                  <ActivityIndicator
+                    color={COLORS.yellow}
+                    style={styles.memberSpinner}
+                  />
+                ) : (
+                  members.map((member) => (
+                    <View key={member.id} style={styles.memberRow}>
+                      <View
+                        style={styles.memberIdentity}
+                      >
+                        <View
+                          style={[
+                            styles.memberAvatar,
+                            member.status === "Pending" &&
+                              styles.pendingMemberAvatar,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.memberInitial,
+                              member.status === "Pending" &&
+                                styles.pendingMemberInitial,
+                            ]}
+                          >
+                            {member.name.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                        <Text style={styles.memberName}>{member.name}</Text>
+                      </View>
                       <View
                         style={[
-                          styles.memberAvatar,
+                          styles.statusBadge,
                           member.status === "Pending" &&
-                            styles.pendingMemberAvatar,
+                            styles.pendingStatusBadge,
                         ]}
                       >
                         <Text
                           style={[
-                            styles.memberInitial,
+                            styles.statusText,
                             member.status === "Pending" &&
-                              styles.pendingMemberInitial,
+                              styles.pendingStatusText,
                           ]}
                         >
-                          {member.name.charAt(0).toUpperCase()}
+                          {member.status}
                         </Text>
                       </View>
-                      <Text style={styles.memberName}>{member.name}</Text>
                     </View>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        member.status === "Pending" &&
-                          styles.pendingStatusBadge,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.statusText,
-                          member.status === "Pending" &&
-                            styles.pendingStatusText,
-                        ]}
-                      >
-                        {member.status}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
+                  ))
+                )}
                 <Pressable
                   accessibilityRole="button"
                   onPress={onDone}
@@ -428,6 +566,7 @@ const styles = StyleSheet.create({
   addButtonText: { color: COLORS.yellowInk, fontSize: 12, fontWeight: "700" },
   resultGap: { height: 8 },
   emptyResult: { color: COLORS.mutedDark, fontSize: 13, paddingVertical: 12 },
+  searchSpinner: { marginVertical: 18 },
   fallbackLabel: { marginTop: 34 },
   placeholderCard: {
     padding: 20,
@@ -483,6 +622,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surfaceHigh,
     borderRadius: 4,
   },
+  errorText: {
+    marginBottom: 10,
+    color: "#FFB4AB",
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  memberSpinner: { marginVertical: 22 },
   memberRow: {
     minHeight: 58,
     flexDirection: "row",

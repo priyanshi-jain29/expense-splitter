@@ -1,6 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import React from "react";
+import { useFocusEffect } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -9,6 +11,8 @@ import {
   Text,
   View,
 } from "react-native";
+import { API_BASE_URL } from "../config/api";
+import { authClient } from "../config/auth-client";
 
 const COLORS = {
   background: "#131313",
@@ -22,54 +26,15 @@ const COLORS = {
   error: "#FFB4AB",
 };
 
-type ExpenseBreakdown = {
-  purpose: string;
-  amount: number;
-};
-
 type MemberBalance = {
   userId: string;
   name: string;
   netAmount: number;
   direction: "owed_to_you" | "you_owe";
-  expenses: ExpenseBreakdown[];
 };
 
-const MY_BALANCES: MemberBalance[] = [
-  {
-    userId: "john",
-    name: "John",
-    netAmount: 600,
-    direction: "owed_to_you",
-    expenses: [
-      { purpose: "Scuba Diving", amount: 1200 },
-      { purpose: "Petrol", amount: -600 },
-    ],
-  },
-  {
-    userId: "priya",
-    name: "Priya",
-    netAmount: 400,
-    direction: "you_owe",
-    expenses: [
-      { purpose: "Beach Shack", amount: 450 },
-      { purpose: "Dinner", amount: -850 },
-    ],
-  },
-  {
-    userId: "arjun",
-    name: "Arjun",
-    netAmount: 250,
-    direction: "owed_to_you",
-    expenses: [
-      { purpose: "Airport Cab", amount: 500 },
-      { purpose: "Snacks", amount: -250 },
-    ],
-  },
-];
-
 const rupees = (amount: number) =>
-  Math.abs(amount).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  Math.abs(amount).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
 function Header({
   onBack,
@@ -94,46 +59,30 @@ function Header({
       </Pressable>
 
       <Text numberOfLines={1} style={styles.groupName}>
-        Trip to Goa
+        Group Details
       </Text>
 
-      <View style={styles.headerActions}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Search group"
-          hitSlop={10}
-          onPress={() => undefined}
-          style={({ pressed }) => [
-            styles.headerButton,
-            pressed && styles.pressed,
-          ]}
-        >
-          <MaterialIcons name="search" size={22} color={COLORS.muted} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="More options"
-          hitSlop={10}
-          onPress={onAddMembers}
-          style={({ pressed }) => [
-            styles.headerButton,
-            pressed && styles.pressed,
-          ]}
-        >
-          <MaterialIcons name="more-vert" size={22} color={COLORS.muted} />
-        </Pressable>
-      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Add members"
+        hitSlop={10}
+        onPress={onAddMembers}
+        style={({ pressed }) => [
+          styles.addMembersButton,
+          pressed && styles.pressed,
+        ]}
+      >
+        <Text style={styles.addMembersLabel}>Add members</Text>
+      </Pressable>
     </View>
   );
 }
 
 function BalanceRow({
   member,
-  onOpenExpense,
   onSettleUp,
 }: {
   member: MemberBalance;
-  onOpenExpense?: (expenseId: string) => void;
   onSettleUp?: () => void;
 }) {
   const isOwed = member.direction === "owed_to_you";
@@ -154,32 +103,6 @@ function BalanceRow({
           {rupees(member.netAmount)}
         </Text>
       </Pressable>
-
-      <View style={styles.breakdown}>
-        {member.expenses.map((expense) => (
-          <Pressable
-            key={expense.purpose}
-            accessibilityRole="button"
-            accessibilityLabel={`Open ${expense.purpose} expense`}
-            onPress={() =>
-              onOpenExpense?.(
-                expense.purpose.toLowerCase().replace(/\s+/g, "-"),
-              )
-            }
-            style={styles.expenseRow}
-          >
-            <Text style={styles.expensePurpose}>{expense.purpose}</Text>
-            <Text
-              style={[
-                styles.expenseAmount,
-                expense.amount > 0 ? styles.positive : styles.negative,
-              ]}
-            >
-              {expense.amount > 0 ? "+" : "-"}₹{rupees(expense.amount)}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
     </View>
   );
 }
@@ -211,20 +134,83 @@ function BottomNavigation() {
 }
 
 type GroupDetailsScreenProps = {
+  groupId: string;
   onBack?: () => void;
   onAddMembers?: () => void;
   onAddExpense?: () => void;
-  onOpenExpense?: (expenseId: string) => void;
   onSettleUp?: () => void;
 };
 
 export default function GroupDetailsScreen({
+  groupId,
   onBack,
   onAddMembers,
   onAddExpense,
-  onOpenExpense,
   onSettleUp,
 }: GroupDetailsScreenProps) {
+  const { data: session, isPending: isSessionPending } =
+    authClient.useSession();
+  const [balances, setBalances] = useState<MemberBalance[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      const controller = new AbortController();
+
+      async function loadBalances() {
+        setIsLoading(true);
+        setError(null);
+
+        if (!groupId) {
+          setBalances([]);
+          setError("A group ID is required to load balances.");
+          setIsLoading(false);
+          return;
+        }
+        if (isSessionPending) return;
+        const userId = session?.user.id;
+        if (!userId) {
+          setBalances([]);
+          setError("Please log in to view group balances.");
+          setIsLoading(false);
+          return;
+        }
+
+        try {
+          const query = new URLSearchParams({ userId });
+          const response = await fetch(
+            `${API_BASE_URL}/groups/${groupId}/balances?${query}`,
+            {
+              signal: controller.signal,
+              credentials: "include",
+            },
+          );
+          if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`);
+          }
+
+          const data = (await response.json()) as MemberBalance[];
+          setBalances(data);
+        } catch (requestError) {
+          if (
+            requestError instanceof Error &&
+            requestError.name !== "AbortError"
+          ) {
+            setError("Unable to load balances. Please try again.");
+          }
+        } finally {
+          if (!controller.signal.aborted) {
+            setIsLoading(false);
+          }
+        }
+      }
+
+      void loadBalances();
+      return () => controller.abort();
+    }, [groupId, isSessionPending, session?.user.id]),
+  );
+
   return (
     <View style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
@@ -237,16 +223,26 @@ export default function GroupDetailsScreen({
             showsVerticalScrollIndicator={false}
           >
             <Text style={styles.sectionTitle}>Balances</Text>
-            <View style={styles.balanceList}>
-              {MY_BALANCES.map((member) => (
-                <BalanceRow
-                  key={member.userId}
-                  member={member}
-                  onOpenExpense={onOpenExpense}
-                  onSettleUp={onSettleUp}
-                />
-              ))}
-            </View>
+            {isLoading ? (
+              <View style={styles.statusState}>
+                <ActivityIndicator color={COLORS.yellow} size="large" />
+                <Text style={styles.statusText}>Loading balances…</Text>
+              </View>
+            ) : error ? (
+              <Text style={[styles.statusState, styles.errorText]}>{error}</Text>
+            ) : balances.length === 0 ? (
+              <Text style={styles.statusState}>All settled up.</Text>
+            ) : (
+              <View style={styles.balanceList}>
+                {balances.map((member) => (
+                  <BalanceRow
+                    key={member.userId}
+                    member={member}
+                    onSettleUp={onSettleUp}
+                  />
+                ))}
+              </View>
+            )}
           </ScrollView>
 
           <Pressable
@@ -308,9 +304,17 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: -0.35,
   },
-  headerActions: {
-    flexDirection: "row",
+  addMembersButton: {
+    minHeight: 44,
+    paddingHorizontal: 8,
     alignItems: "center",
+    justifyContent: "center",
+  },
+  addMembersLabel: {
+    color: COLORS.yellow,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
   },
   scrollContent: {
     paddingHorizontal: 16,
@@ -328,6 +332,23 @@ const styles = StyleSheet.create({
   balanceList: {
     marginTop: 24,
     rowGap: 40,
+  },
+  statusState: {
+    minHeight: 180,
+    marginTop: 16,
+    color: COLORS.muted,
+    fontSize: 14,
+    textAlign: "center",
+    alignItems: "center",
+    justifyContent: "center",
+    rowGap: 12,
+  },
+  statusText: {
+    color: COLORS.muted,
+    fontSize: 14,
+  },
+  errorText: {
+    color: COLORS.error,
   },
   memberBlock: {
     width: "100%",
@@ -353,34 +374,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
     fontWeight: "700",
-  },
-  breakdown: {
-    marginTop: 8,
-    paddingTop: 10,
-    paddingHorizontal: 4,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(77, 70, 50, 0.42)",
-    rowGap: 4,
-  },
-  expenseRow: {
-    minHeight: 18,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    columnGap: 12,
-  },
-  expensePurpose: {
-    flex: 1,
-    color: COLORS.muted,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: "500",
-  },
-  expenseAmount: {
-    textAlign: "right",
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: "600",
   },
   positive: {
     color: COLORS.success,

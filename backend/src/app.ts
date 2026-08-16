@@ -4,6 +4,7 @@ import { toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
 import expensesRouter from "./routes/expenses.js";
 import groupsRouter from "./routes/groups.js";
+import usersRouter from "./routes/users.js";
 
 export const app = express();
 
@@ -18,6 +19,7 @@ app.all("/api/auth/*splat", toNodeHandler(auth));
 app.use(express.json());
 app.use("/expenses", expensesRouter);
 app.use("/groups", groupsRouter);
+app.use("/users", usersRouter);
 
 const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
   console.error(error);
