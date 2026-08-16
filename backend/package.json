@@ -4,12 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
+    "@types/express": "^5.0.6",
     "drizzle-orm": "^0.45.2",
+    "express": "^5.2.1",
     "pg": "^8.22.0"
   },
   "devDependencies": {
