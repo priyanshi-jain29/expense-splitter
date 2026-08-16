@@ -1,6 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import React, { useState } from "react";
+import { useFocusEffect } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,6 +14,8 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { API_BASE_URL } from "../config/api";
+import { authClient } from "../config/auth-client";
 
 const COLORS = {
   background: "#131313",
@@ -36,30 +40,23 @@ type RelatedExpense = {
   icon: React.ComponentProps<typeof MaterialIcons>["name"];
 };
 
-const PERSON = {
-  name: "John",
-  amountOwed: 600,
+type MemberBalance = {
+  userId: string;
+  name: string;
+  netAmount: number;
+  direction: "owed_to_you" | "you_owe";
 };
 
-const RELATED_EXPENSES: RelatedExpense[] = [
-  {
-    id: "dinner",
-    title: "Dinner at Olive",
-    date: "Oct 24, 2023",
-    amount: 400,
-    icon: "restaurant",
-  },
-  {
-    id: "cab",
-    title: "Cab to Airport",
-    date: "Oct 22, 2023",
-    amount: 200,
-    icon: "local-taxi",
-  },
-];
+type ActivityResponse = {
+  id: string;
+  type: "expense" | "settlement";
+  description: string;
+  amount: number;
+  timestamp: string;
+};
 
 const formatAmount = (amount: number) =>
-  amount.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  amount.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 
 function Header({ onBack }: { onBack?: () => void }) {
   return (
@@ -158,15 +155,167 @@ function BottomNavigation() {
 }
 
 type SettleUpScreenProps = {
+  groupId: string;
+  memberId?: string;
   onBack?: () => void;
   onComplete?: () => void;
 };
 
 export default function SettleUpScreen({
+  groupId,
+  memberId,
   onBack,
   onComplete,
 }: SettleUpScreenProps) {
-  const [amount, setAmount] = useState(String(PERSON.amountOwed));
+  const { data: session, isPending: isSessionPending } =
+    authClient.useSession();
+  const [person, setPerson] = useState<MemberBalance | null>(null);
+  const [relatedExpenses, setRelatedExpenses] = useState<RelatedExpense[]>([]);
+  const [amount, setAmount] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      const controller = new AbortController();
+
+      async function loadSettlementDetails() {
+        setIsLoading(true);
+        setError(null);
+
+        if (!groupId) {
+          setError("A group ID is required.");
+          setIsLoading(false);
+          return;
+        }
+        if (isSessionPending) return;
+        const userId = session?.user.id;
+        if (!userId) {
+          setError("Please log in to settle a balance.");
+          setIsLoading(false);
+          return;
+        }
+
+        try {
+          const query = new URLSearchParams({ userId });
+          const [balancesResponse, activityResponse] = await Promise.all([
+            fetch(`${API_BASE_URL}/groups/${groupId}/balances?${query}`, {
+              signal: controller.signal,
+              credentials: "include",
+            }),
+            fetch(`${API_BASE_URL}/groups/${groupId}/activity`, {
+              signal: controller.signal,
+              credentials: "include",
+            }),
+          ]);
+          if (!balancesResponse.ok || !activityResponse.ok) {
+            throw new Error("Unable to load settlement details");
+          }
+
+          const balances = (await balancesResponse.json()) as MemberBalance[];
+          const activity = (await activityResponse.json()) as ActivityResponse[];
+          const selectedPerson = memberId
+            ? balances.find(
+                (balance) =>
+                  balance.userId === memberId && balance.netAmount > 0,
+              )
+            : balances.find((balance) => balance.netAmount > 0);
+
+          if (!selectedPerson) {
+            setPerson(null);
+            setAmount("");
+            setError("No unsettled balance was found for this member.");
+          } else {
+            setPerson(selectedPerson);
+            setAmount(selectedPerson.netAmount.toFixed(2));
+          }
+          setRelatedExpenses(
+            activity
+              .filter((item) => item.type === "expense")
+              .slice(0, 3)
+              .map((item) => ({
+                id: item.id,
+                title: item.description,
+                date: new Date(item.timestamp).toLocaleDateString("en-IN", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                }),
+                amount: item.amount,
+                icon: "receipt-long",
+              })),
+          );
+        } catch (requestError) {
+          if (
+            requestError instanceof Error &&
+            requestError.name !== "AbortError"
+          ) {
+            setError("Unable to load settlement details. Please try again.");
+          }
+        } finally {
+          if (!controller.signal.aborted) setIsLoading(false);
+        }
+      }
+
+      void loadSettlementDetails();
+      return () => controller.abort();
+    }, [groupId, isSessionPending, memberId, session?.user.id]),
+  );
+
+  const handleComplete = async () => {
+    setError(null);
+    const userId = session?.user.id;
+    const settlementAmount = Number(amount);
+
+    if (!userId || !person) {
+      setError("Unable to identify both people in this settlement.");
+      return;
+    }
+    if (!Number.isFinite(settlementAmount) || settlementAmount <= 0) {
+      setError("Enter a valid settlement amount.");
+      return;
+    }
+    if (settlementAmount > person.netAmount) {
+      setError("The settlement cannot exceed the current balance.");
+      return;
+    }
+
+    const fromUser =
+      person.direction === "owed_to_you" ? person.userId : userId;
+    const toUser =
+      person.direction === "owed_to_you" ? userId : person.userId;
+
+    setIsSubmitting(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/settlements`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          groupId,
+          fromUser,
+          toUser,
+          amount: settlementAmount.toFixed(2),
+        }),
+      });
+      const result = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(result?.error ?? "Unable to record settlement");
+      }
+      onComplete?.();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unable to record settlement. Please try again.",
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <View style={styles.screen}>
@@ -183,6 +332,13 @@ export default function SettleUpScreen({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
+            {isLoading ? (
+              <View style={styles.loadingState}>
+                <ActivityIndicator color={COLORS.yellow} size="large" />
+                <Text style={styles.loadingText}>Loading balance…</Text>
+              </View>
+            ) : person ? (
+              <>
             <View style={styles.profileSection}>
               <View style={styles.avatarRing}>
                 <View style={styles.avatar}>
@@ -196,9 +352,11 @@ export default function SettleUpScreen({
 
               <View style={styles.debtBadge}>
                 <Text style={styles.debtBadgeText}>
-                  {PERSON.name} owes you{" "}
+                  {person.direction === "owed_to_you"
+                    ? `${person.name} owes you `
+                    : `You owe ${person.name} `}
                   <Text style={styles.debtBadgeAmount}>
-                    ₹{formatAmount(PERSON.amountOwed)}
+                    ₹{formatAmount(person.netAmount)}
                   </Text>
                 </Text>
               </View>
@@ -231,29 +389,42 @@ export default function SettleUpScreen({
             <View style={styles.relatedSection}>
               <Text style={styles.relatedHeading}>RELATED EXPENSES</Text>
               <View style={styles.expenseCard}>
-                {RELATED_EXPENSES.map((expense, index) => (
+                {relatedExpenses.length > 0 ? relatedExpenses.map((expense, index) => (
                   <ExpenseRow
                     key={expense.id}
                     expense={expense}
-                    isLast={index === RELATED_EXPENSES.length - 1}
+                    isLast={index === relatedExpenses.length - 1}
                   />
-                ))}
+                )) : (
+                  <Text style={styles.noExpensesText}>No recent expenses.</Text>
+                )}
               </View>
             </View>
+              </>
+            ) : null}
           </ScrollView>
 
           <View style={styles.fixedAction}>
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Confirm payment received"
-              onPress={onComplete}
+              accessibilityState={{ disabled: isLoading || isSubmitting || !person }}
+              disabled={isLoading || isSubmitting || !person}
+              onPress={() => void handleComplete()}
               style={({ pressed }) => [
                 styles.confirmButton,
                 pressed && styles.confirmButtonPressed,
+                (isLoading || isSubmitting || !person) &&
+                  styles.confirmButtonDisabled,
               ]}
             >
               <Text style={styles.confirmButtonText}>
-                CONFIRM PAYMENT RECEIVED
+                {isSubmitting
+                  ? "RECORDING PAYMENT…"
+                  : person?.direction === "you_owe"
+                    ? "CONFIRM PAYMENT SENT"
+                    : "CONFIRM PAYMENT RECEIVED"}
               </Text>
             </Pressable>
           </View>
@@ -307,6 +478,16 @@ const styles = StyleSheet.create({
   profileSection: {
     width: "100%",
     alignItems: "center",
+  },
+  loadingState: {
+    minHeight: 240,
+    alignItems: "center",
+    justifyContent: "center",
+    rowGap: 12,
+  },
+  loadingText: {
+    color: COLORS.outline,
+    fontSize: 12,
   },
   avatarRing: {
     width: 80,
@@ -435,6 +616,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: COLORS.surfaceLow,
   },
+  noExpensesText: {
+    padding: 20,
+    color: COLORS.outline,
+    textAlign: "center",
+    fontSize: 11,
+  },
   expenseRow: {
     minHeight: 72,
     paddingHorizontal: 12,
@@ -503,6 +690,16 @@ const styles = StyleSheet.create({
   confirmButtonPressed: {
     opacity: 0.9,
     transform: [{ scale: 0.97 }],
+  },
+  confirmButtonDisabled: {
+    opacity: 0.55,
+  },
+  errorText: {
+    marginBottom: 8,
+    color: "#FFB4AB",
+    textAlign: "center",
+    fontSize: 12,
+    lineHeight: 17,
   },
   confirmButtonText: {
     color: COLORS.yellowInk,

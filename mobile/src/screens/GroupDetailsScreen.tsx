@@ -83,7 +83,7 @@ function BalanceRow({
   onSettleUp,
 }: {
   member: MemberBalance;
-  onSettleUp?: () => void;
+  onSettleUp?: (memberId: string) => void;
 }) {
   const isOwed = member.direction === "owed_to_you";
 
@@ -92,7 +92,7 @@ function BalanceRow({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Settle balance with ${member.name}`}
-        onPress={onSettleUp}
+        onPress={() => onSettleUp?.(member.userId)}
         style={styles.netRow}
       >
         <Text style={styles.memberName}>{member.name}</Text>
@@ -138,7 +138,7 @@ type GroupDetailsScreenProps = {
   onBack?: () => void;
   onAddMembers?: () => void;
   onAddExpense?: () => void;
-  onSettleUp?: () => void;
+  onSettleUp?: (memberId: string) => void;
 };
 
 export default function GroupDetailsScreen({

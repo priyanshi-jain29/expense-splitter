@@ -9,6 +9,7 @@ export default function GroupsRoute() {
     <MyGroupsScreen
       onCreateGroup={() => router.push("/groups/create")}
       onOpenGroup={(groupId) => router.push(`/groups/${groupId}`)}
+      onSignedOut={() => router.replace("/login")}
     />
   );
 }

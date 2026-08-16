@@ -68,7 +68,13 @@ function DashboardHeader({ groupCount }: { groupCount: number }) {
   );
 }
 
-function TopBar() {
+function TopBar({
+  isSigningOut,
+  onSignOut,
+}: {
+  isSigningOut: boolean;
+  onSignOut: () => void;
+}) {
   return (
     <View style={styles.topBar}>
       <Pressable
@@ -89,12 +95,22 @@ function TopBar() {
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Search groups"
+        accessibilityLabel="Sign out"
+        accessibilityState={{ disabled: isSigningOut }}
+        disabled={isSigningOut}
         hitSlop={10}
-        onPress={() => undefined}
-        style={styles.topBarButton}
+        onPress={onSignOut}
+        style={({ pressed }) => [
+          styles.signOutButton,
+          pressed && styles.signOutButtonPressed,
+          isSigningOut && styles.signOutButtonDisabled,
+        ]}
       >
-        <MaterialIcons name="search" size={22} color={COLORS.text} />
+        {isSigningOut ? (
+          <ActivityIndicator size="small" color={COLORS.yellow} />
+        ) : (
+          <Text style={styles.signOutLabel}>Sign out</Text>
+        )}
       </Pressable>
     </View>
   );
@@ -129,17 +145,37 @@ function BottomNavigation() {
 type MyGroupsScreenProps = {
   onOpenGroup?: (groupId: string) => void;
   onCreateGroup?: () => void;
+  onSignedOut?: () => void;
 };
 
 export default function MyGroupsScreen({
   onOpenGroup,
   onCreateGroup,
+  onSignedOut,
 }: MyGroupsScreenProps) {
   const { data: session, isPending: isSessionPending } =
     authClient.useSession();
   const [groups, setGroups] = useState<Group[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleSignOut = async () => {
+    setIsSigningOut(true);
+    setError(null);
+
+    try {
+      const result = await authClient.signOut();
+      if (result.error) {
+        throw new Error(result.error.message ?? "Sign out failed");
+      }
+      onSignedOut?.();
+    } catch {
+      setError("Unable to sign out. Please try again.");
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -200,7 +236,10 @@ export default function MyGroupsScreen({
 
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.contentColumn}>
-          <TopBar />
+          <TopBar
+            isSigningOut={isSigningOut}
+            onSignOut={() => void handleSignOut()}
+          />
           <FlatList
             data={groups}
             keyExtractor={(item) => item.id}
@@ -281,6 +320,24 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
+  },
+  signOutButton: {
+    minWidth: 58,
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  signOutButtonPressed: {
+    opacity: 0.65,
+  },
+  signOutButtonDisabled: {
+    opacity: 0.6,
+  },
+  signOutLabel: {
+    color: COLORS.yellow,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
   },
   brandTitle: {
     color: COLORS.primaryText,

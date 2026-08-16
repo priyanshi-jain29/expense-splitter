@@ -1,6 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import React, { useState } from "react";
+import { useFocusEffect } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -12,6 +14,8 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { API_BASE_URL } from "../config/api";
+import { authClient } from "../config/auth-client";
 
 const COLORS = {
   background: "#131313",
@@ -36,13 +40,16 @@ type Member = {
   name: string;
   role: string;
   isHost?: boolean;
+  is_placeholder: boolean;
 };
 
-const MEMBERS: Member[] = [
-  { id: "you", name: "You", role: "Host", isHost: true },
-  { id: "john", name: "John", role: "Group Member" },
-  { id: "priya", name: "Priya", role: "Group Member" },
-];
+const moneyPattern = /^\d+(?:\.\d{0,2})?$/;
+
+const toCents = (value: string) => {
+  if (!moneyPattern.test(value.trim())) return null;
+  const [whole, fraction = ""] = value.trim().split(".");
+  return Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+};
 
 function Header({ onBack }: { onBack?: () => void }) {
   return (
@@ -122,10 +129,16 @@ function SplitToggle({
 function MemberCard({
   member,
   selected,
+  exactAmount,
+  showExactAmount,
+  onExactAmountChange,
   onToggle,
 }: {
   member: Member;
   selected: boolean;
+  exactAmount: string;
+  showExactAmount: boolean;
+  onExactAmountChange: (value: string) => void;
   onToggle: () => void;
 }) {
   return (
@@ -156,6 +169,25 @@ function MemberCard({
         <Text style={styles.memberName}>{member.name}</Text>
         <Text style={styles.memberRole}>{member.role}</Text>
       </View>
+
+      {showExactAmount ? (
+        <View style={styles.exactAmountShell}>
+          <Text style={styles.exactCurrency}>₹</Text>
+          <TextInput
+            accessibilityLabel={`${member.name}'s exact share`}
+            value={exactAmount}
+            onChangeText={(value) =>
+              onExactAmountChange(value.replace(/[^0-9.]/g, ""))
+            }
+            onPressIn={(event) => event.stopPropagation()}
+            placeholder="0.00"
+            placeholderTextColor={COLORS.outline}
+            keyboardType="decimal-pad"
+            selectionColor={COLORS.yellow}
+            style={styles.exactAmountInput}
+          />
+        </View>
+      ) : null}
 
       <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
         {selected && (
@@ -196,22 +228,107 @@ function BottomNavigation() {
 }
 
 type AddExpenseScreenProps = {
+  groupId: string;
   onBack?: () => void;
   onSave?: () => void;
 };
 
 export default function AddExpenseScreen({
+  groupId,
   onBack,
   onSave,
 }: AddExpenseScreenProps) {
+  const { data: session, isPending: isSessionPending } =
+    authClient.useSession();
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
-  const [splitMethod, setSplitMethod] = useState<SplitMethod>(null);
+  const [splitMethod, setSplitMethod] = useState<SplitMethod>("equal");
+  const [members, setMembers] = useState<Member[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(
     new Set(),
   );
+  const [exactAmounts, setExactAmounts] = useState<Record<string, string>>({});
+  const [isLoadingMembers, setIsLoadingMembers] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      const controller = new AbortController();
+
+      async function loadMembers() {
+        setIsLoadingMembers(true);
+        setError(null);
+
+        if (!groupId) {
+          setError("A group ID is required to load members.");
+          setIsLoadingMembers(false);
+          return;
+        }
+        if (isSessionPending) return;
+        const userId = session?.user.id;
+        if (!userId) {
+          setError("Please log in to add an expense.");
+          setIsLoadingMembers(false);
+          return;
+        }
+
+        try {
+          const response = await fetch(
+            `${API_BASE_URL}/groups/${groupId}/members`,
+            { signal: controller.signal, credentials: "include" },
+          );
+          if (!response.ok) {
+            throw new Error(`Request failed with status ${response.status}`);
+          }
+
+          const data = (await response.json()) as Array<{
+            id: string;
+            name: string;
+            is_placeholder: boolean;
+          }>;
+          const loadedMembers = data.map((member) => ({
+            ...member,
+            name: member.id === userId ? "You" : member.name,
+            role:
+              member.id === userId
+                ? "Payer"
+                : member.is_placeholder
+                  ? "Placeholder Member"
+                  : "Group Member",
+            isHost: member.id === userId,
+          }));
+          setMembers(loadedMembers);
+          setSelectedMemberIds(
+            new Set(loadedMembers.map((member) => member.id)),
+          );
+        } catch (requestError) {
+          if (
+            requestError instanceof Error &&
+            requestError.name !== "AbortError"
+          ) {
+            setError("Unable to load group members. Please try again.");
+          }
+        } finally {
+          if (!controller.signal.aborted) setIsLoadingMembers(false);
+        }
+      }
+
+      void loadMembers();
+      return () => controller.abort();
+    }, [groupId, isSessionPending, session?.user.id]),
+  );
 
   const toggleMember = (memberId: string) => {
+    if (
+      splitMethod === "equal" &&
+      memberId === session?.user.id &&
+      selectedMemberIds.has(memberId)
+    ) {
+      setError("The payer must stay included in an equal split.");
+      return;
+    }
+    setError(null);
     setSelectedMemberIds((current) => {
       const next = new Set(current);
       if (next.has(memberId)) {
@@ -224,11 +341,108 @@ export default function AddExpenseScreen({
   };
 
   const toggleAllMembers = () => {
-    setSelectedMemberIds((current) =>
-      current.size === MEMBERS.length
-        ? new Set()
-        : new Set(MEMBERS.map((member) => member.id)),
-    );
+    setError(null);
+    setSelectedMemberIds((current) => {
+      if (current.size !== members.length) {
+        return new Set(members.map((member) => member.id));
+      }
+      return splitMethod === "equal" && session?.user.id
+        ? new Set([session.user.id])
+        : new Set();
+    });
+  };
+
+  const changeSplitMethod = (method: Exclude<SplitMethod, null>) => {
+    setError(null);
+    setSplitMethod(method);
+    if (method === "equal" && session?.user.id) {
+      setSelectedMemberIds((current) =>
+        new Set([...current, session.user.id]),
+      );
+    }
+  };
+
+  const handleSave = async () => {
+    setError(null);
+    const userId = session?.user.id;
+    const amountInCents = toCents(amount);
+
+    if (!userId) {
+      setError("Please log in to save an expense.");
+      return;
+    }
+    if (!groupId || amountInCents === null || amountInCents <= 0) {
+      setError("Enter a valid expense amount.");
+      return;
+    }
+    if (!description.trim()) {
+      setError("Enter a description for the expense.");
+      return;
+    }
+    if (!splitMethod) {
+      setError("Choose an equal or exact split.");
+      return;
+    }
+    const participantIds = [...selectedMemberIds];
+    if (participantIds.length === 0) {
+      setError("Select at least one member.");
+      return;
+    }
+    if (splitMethod === "equal" && !selectedMemberIds.has(userId)) {
+      setError("The payer must be included in the split.");
+      return;
+    }
+
+    let splitMembers: string[] | Array<{ userId: string; shareAmount: string }> =
+      participantIds;
+    if (splitMethod === "exact") {
+      const shares = participantIds.map((memberId) => ({
+        userId: memberId,
+        shareAmount: exactAmounts[memberId]?.trim() ?? "",
+      }));
+      const shareCents = shares.map((share) => toCents(share.shareAmount));
+      if (shareCents.some((share) => share === null)) {
+        setError("Enter a valid exact share for every selected member.");
+        return;
+      }
+      if (shareCents.reduce<number>((sum, share) => sum + (share ?? 0), 0) !== amountInCents) {
+        setError("Exact shares must add up to the total amount.");
+        return;
+      }
+      splitMembers = shares;
+    }
+
+    setIsSaving(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/expenses`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          groupId,
+          paidBy: userId,
+          amount: (amountInCents / 100).toFixed(2),
+          description: description.trim(),
+          splitType: splitMethod,
+          members: splitMembers,
+        }),
+      });
+      const result = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(result?.error ?? "Unable to save expense");
+      }
+      onSave?.();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unable to save expense. Please try again.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -249,7 +463,9 @@ export default function AddExpenseScreen({
                 <TextInput
                   accessibilityLabel="Expense amount"
                   value={amount}
-                  onChangeText={setAmount}
+                  onChangeText={(value) =>
+                    setAmount(value.replace(/[^0-9.]/g, ""))
+                  }
                   placeholder="0.00"
                   placeholderTextColor={COLORS.yellow}
                   keyboardType="decimal-pad"
@@ -277,7 +493,7 @@ export default function AddExpenseScreen({
               />
             </View>
 
-            <SplitToggle value={splitMethod} onChange={setSplitMethod} />
+            <SplitToggle value={splitMethod} onChange={changeSplitMethod} />
 
             <View style={styles.memberHeader}>
               <Text style={styles.memberHeading}>Split with:</Text>
@@ -288,7 +504,7 @@ export default function AddExpenseScreen({
                 style={({ pressed }) => pressed && styles.controlPressed}
               >
                 <Text style={styles.selectAll}>
-                  {selectedMemberIds.size === MEMBERS.length
+                  {members.length > 0 && selectedMemberIds.size === members.length
                     ? "Clear All"
                     : "Select All"}
                 </Text>
@@ -296,15 +512,36 @@ export default function AddExpenseScreen({
             </View>
 
             <FlatList
-              data={MEMBERS}
+              data={members}
               keyExtractor={(member) => member.id}
               renderItem={({ item }) => (
                 <MemberCard
                   member={item}
                   selected={selectedMemberIds.has(item.id)}
+                  showExactAmount={
+                    splitMethod === "exact" && selectedMemberIds.has(item.id)
+                  }
+                  exactAmount={exactAmounts[item.id] ?? ""}
+                  onExactAmountChange={(value) =>
+                    setExactAmounts((current) => ({
+                      ...current,
+                      [item.id]: value,
+                    }))
+                  }
                   onToggle={() => toggleMember(item.id)}
                 />
               )}
+              ListEmptyComponent={
+                <View style={styles.memberLoadingState}>
+                  {isLoadingMembers ? (
+                    <ActivityIndicator color={COLORS.yellow} size="large" />
+                  ) : (
+                    <Text style={styles.memberLoadingText}>
+                      No members found in this group.
+                    </Text>
+                  )}
+                </View>
+              }
               ItemSeparatorComponent={() => <View style={styles.memberGap} />}
               contentContainerStyle={styles.memberListContent}
               keyboardShouldPersistTaps="handled"
@@ -314,17 +551,27 @@ export default function AddExpenseScreen({
           </View>
 
           <View style={styles.fixedAction}>
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Save expense"
-              onPress={onSave}
+              accessibilityState={{ disabled: isSaving || isLoadingMembers }}
+              disabled={isSaving || isLoadingMembers}
+              onPress={() => void handleSave()}
               style={({ pressed }) => [
                 styles.saveButton,
                 pressed && styles.saveButtonPressed,
+                (isSaving || isLoadingMembers) && styles.saveButtonDisabled,
               ]}
             >
-              <MaterialIcons name="save" size={20} color={COLORS.yellowInk} />
-              <Text style={styles.saveButtonText}>Save Expense</Text>
+              {isSaving ? (
+                <ActivityIndicator color={COLORS.yellowInk} size="small" />
+              ) : (
+                <>
+                  <MaterialIcons name="save" size={20} color={COLORS.yellowInk} />
+                  <Text style={styles.saveButtonText}>Save Expense</Text>
+                </>
+              )}
             </Pressable>
           </View>
         </KeyboardAvoidingView>
@@ -552,6 +799,38 @@ const styles = StyleSheet.create({
     borderColor: COLORS.yellow,
     backgroundColor: COLORS.yellow,
   },
+  exactAmountShell: {
+    width: 94,
+    height: 38,
+    marginRight: 10,
+    paddingHorizontal: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 6,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  exactCurrency: {
+    color: COLORS.yellow,
+    fontSize: 12,
+  },
+  exactAmountInput: {
+    flex: 1,
+    height: 36,
+    padding: 0,
+    color: COLORS.text,
+    textAlign: "right",
+    fontSize: 12,
+  },
+  memberLoadingState: {
+    minHeight: 120,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  memberLoadingText: {
+    color: COLORS.muted,
+    fontSize: 12,
+  },
   memberGap: {
     height: 12,
   },
@@ -583,6 +862,16 @@ const styles = StyleSheet.create({
   saveButtonPressed: {
     opacity: 0.9,
     transform: [{ scale: 0.98 }],
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  errorText: {
+    marginBottom: 8,
+    color: "#FFB4AB",
+    textAlign: "center",
+    fontSize: 12,
+    lineHeight: 17,
   },
   saveButtonText: {
     color: COLORS.yellowInk,

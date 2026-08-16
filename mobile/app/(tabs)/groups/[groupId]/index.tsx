@@ -12,8 +12,12 @@ export default function GroupDetailsRoute() {
       groupId={currentGroupId}
       onAddExpense={() => router.push(`/groups/${currentGroupId}/add-expense`)}
       onAddMembers={() => router.push(`/groups/${currentGroupId}/add-members`)}
-      onBack={() => router.back()}
-      onSettleUp={() => router.push(`/groups/${currentGroupId}/settle-up`)}
+      onBack={() => router.replace("/groups")}
+      onSettleUp={(memberId) =>
+        router.push(
+          `/groups/${currentGroupId}/settle-up?memberId=${encodeURIComponent(memberId)}`,
+        )
+      }
     />
   );
 }

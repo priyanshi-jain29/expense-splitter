@@ -49,6 +49,7 @@ router.get("/:groupId/activity", async (request, response, next) => {
     const [groupExpenses, groupSettlements] = await Promise.all([
       db
         .select({
+          id: expenses.id,
           description: expenses.description,
           payerName: users.name,
           amount: expenses.amount,
@@ -59,6 +60,7 @@ router.get("/:groupId/activity", async (request, response, next) => {
         .where(eq(expenses.groupId, groupId)),
       db
         .select({
+          id: settlements.id,
           payerName: settlementPayer.name,
           recipientName: settlementRecipient.name,
           amount: settlements.amount,
@@ -78,12 +80,14 @@ router.get("/:groupId/activity", async (request, response, next) => {
 
     const activity = [
       ...groupExpenses.map((expense) => ({
+        id: expense.id,
         type: "expense" as const,
         description: `${expense.description} — paid by ${expense.payerName}`,
         amount: Number(expense.amount),
         timestamp: expense.timestamp,
       })),
       ...groupSettlements.map((settlement) => ({
+        id: settlement.id,
         type: "settlement" as const,
         description: `${settlement.payerName} paid ${settlement.recipientName}`,
         amount: Number(settlement.amount),

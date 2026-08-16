@@ -7,7 +7,9 @@ export default function ActivityRoute() {
 
   return (
     <ActivityFeedScreen
-      onOpenExpense={() => router.push("/groups/goa/expenses/dinner")}
+      onOpenExpense={(groupId, expenseId) =>
+        router.push(`/groups/${groupId}/expenses/${expenseId}`)
+      }
     />
   );
 }

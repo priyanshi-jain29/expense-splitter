@@ -1,6 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import React from "react";
+import { useFocusEffect } from "expo-router";
+import React, { useCallback, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Pressable,
   SafeAreaView,
   SectionList,
@@ -9,6 +11,8 @@ import {
   Text,
   View,
 } from "react-native";
+import { API_BASE_URL } from "../config/api";
+import { authClient } from "../config/auth-client";
 
 const COLORS = {
   outer: "#000000",
@@ -25,93 +29,46 @@ const COLORS = {
   cyanDark: "#00696F",
 };
 
-type ActivityKind = "expense" | "settled" | "updated" | "payment";
-
 type ActivityItem = {
   id: string;
-  kind: ActivityKind;
-  actor: string;
-  action: string;
-  subject?: string;
-  detail: string;
+  type: "expense" | "settlement";
+  description: string;
+  amount: number;
+  timestamp: string;
+  groupId: string;
   group: string;
-  groupIcon: "groups" | "home" | "family-restroom";
-  time: string;
 };
 
-const ACTIVITY_SECTIONS: { title: string; data: ActivityItem[] }[] = [
-  {
-    title: "Today",
-    data: [
-      {
-        id: "dinner",
-        kind: "expense",
-        actor: "Priya",
-        action: "added",
-        subject: '"Dinner"',
-        detail: "₹600",
-        group: "Trip to Goa",
-        groupIcon: "groups",
-        time: "2h ago",
-      },
-      {
-        id: "settled",
-        kind: "settled",
-        actor: "Rahul",
-        action: "settled with you",
-        detail: "Balance cleared",
-        group: "Roommates",
-        groupIcon: "home",
-        time: "5h ago",
-      },
-    ],
-  },
-  {
-    title: "Yesterday",
-    data: [
-      {
-        id: "fuel",
-        kind: "expense",
-        actor: "Ankit",
-        action: "added",
-        subject: '"Fuel"',
-        detail: "₹1,200",
-        group: "Trip to Goa",
-        groupIcon: "groups",
-        time: "Yesterday",
-      },
-      {
-        id: "groceries",
-        kind: "updated",
-        actor: "You",
-        action: "updated",
-        subject: '"Groceries"',
-        detail: "Amount changed to ₹450",
-        group: "Roommates",
-        groupIcon: "home",
-        time: "Yesterday",
-      },
-      {
-        id: "netflix",
-        kind: "payment",
-        actor: "Ishani",
-        action: "paid you for",
-        subject: '"Netflix"',
-        detail: "₹199",
-        group: "Family Plan",
-        groupIcon: "family-restroom",
-        time: "Yesterday",
-      },
-    ],
-  },
-];
-
-const ICONS: Record<ActivityKind, keyof typeof MaterialIcons.glyphMap> = {
+const ICONS: Record<ActivityItem["type"], keyof typeof MaterialIcons.glyphMap> = {
   expense: "receipt-long",
-  settled: "handshake",
-  updated: "edit",
-  payment: "check-circle",
+  settlement: "handshake",
 };
+
+const formatAmount = (amount: number) =>
+  amount.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+const formatTime = (timestamp: string) =>
+  new Date(timestamp).toLocaleTimeString("en-IN", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+function sectionTitle(timestamp: string) {
+  const activityDate = new Date(timestamp);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  if (activityDate.toDateString() === today.toDateString()) return "Today";
+  if (activityDate.toDateString() === yesterday.toDateString()) {
+    return "Yesterday";
+  }
+  return activityDate.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 function Header() {
   return (
@@ -133,19 +90,15 @@ function ActivityCard({
   item: ActivityItem;
   onPress?: () => void;
 }) {
-  const isSettlement = item.kind === "settled" || item.kind === "payment";
-  const isMuted = item.kind === "updated";
+  const isSettlement = item.type === "settlement";
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${item.actor} ${item.action}${
-        item.subject ? ` ${item.subject}` : ""
-      }, ${item.detail}, ${item.group}, ${item.time}`}
+      accessibilityLabel={`${item.description}, ₹${formatAmount(item.amount)}, ${item.group}`}
       onPress={onPress}
       style={({ pressed }) => [
         styles.card,
-        isMuted && styles.mutedCard,
         pressed && styles.cardPressed,
       ]}
     >
@@ -153,18 +106,13 @@ function ActivityCard({
         style={[
           styles.eventIcon,
           isSettlement && styles.settlementEventIcon,
-          isMuted && styles.mutedEventIcon,
         ]}
       >
         <MaterialIcons
-          name={ICONS[item.kind]}
+          name={ICONS[item.type]}
           size={20}
           color={
-            isSettlement
-              ? COLORS.cyan
-              : isMuted
-                ? COLORS.muted
-                : COLORS.yellow
+            isSettlement ? COLORS.cyan : COLORS.yellow
           }
         />
       </View>
@@ -172,27 +120,23 @@ function ActivityCard({
       <View style={styles.cardContent}>
         <View style={styles.descriptionRow}>
           <Text style={styles.description}>
-            <Text style={styles.actor}>{item.actor}</Text> {item.action}
-            {item.subject ? (
-              <Text style={styles.subject}> {item.subject}</Text>
-            ) : null}
+            {item.description}
           </Text>
-          <Text style={styles.time}>{item.time}</Text>
+          <Text style={styles.time}>{formatTime(item.timestamp)}</Text>
         </View>
 
         <Text
           style={[
             styles.detail,
             isSettlement && styles.settlementDetail,
-            isMuted && styles.mutedDetail,
           ]}
         >
-          {item.detail}
+          ₹{formatAmount(item.amount)}
         </Text>
 
         <View style={styles.groupRow}>
           <MaterialIcons
-            name={item.groupIcon}
+            name="groups"
             size={13}
             color={COLORS.muted}
           />
@@ -237,12 +181,102 @@ function BottomNavigation() {
 }
 
 type ActivityFeedScreenProps = {
-  onOpenExpense?: (expenseId: string) => void;
+  onOpenExpense?: (groupId: string, expenseId: string) => void;
 };
 
 export default function ActivityFeedScreen({
   onOpenExpense,
 }: ActivityFeedScreenProps) {
+  const { data: session, isPending: isSessionPending } =
+    authClient.useSession();
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      const controller = new AbortController();
+
+      async function loadActivity() {
+        setIsLoading(true);
+        setError(null);
+
+        if (isSessionPending) return;
+        const userId = session?.user.id;
+        if (!userId) {
+          setActivity([]);
+          setError("Please log in to view activity.");
+          setIsLoading(false);
+          return;
+        }
+
+        try {
+          const query = new URLSearchParams({ userId });
+          const groupsResponse = await fetch(`${API_BASE_URL}/groups?${query}`, {
+            signal: controller.signal,
+            credentials: "include",
+          });
+          if (!groupsResponse.ok) {
+            throw new Error("Unable to load groups");
+          }
+          const groups = (await groupsResponse.json()) as Array<{
+            id: string;
+            name: string;
+          }>;
+          const activityByGroup = await Promise.all(
+            groups.map(async (group) => {
+              const response = await fetch(
+                `${API_BASE_URL}/groups/${group.id}/activity`,
+                { signal: controller.signal, credentials: "include" },
+              );
+              if (!response.ok) {
+                throw new Error("Unable to load group activity");
+              }
+              const items = (await response.json()) as Array<
+                Omit<ActivityItem, "groupId" | "group">
+              >;
+              return items.map((item) => ({
+                ...item,
+                groupId: group.id,
+                group: group.name,
+              }));
+            }),
+          );
+          setActivity(
+            activityByGroup
+              .flat()
+              .sort(
+                (first, second) =>
+                  new Date(second.timestamp).getTime() -
+                  new Date(first.timestamp).getTime(),
+              ),
+          );
+        } catch (requestError) {
+          if (
+            requestError instanceof Error &&
+            requestError.name !== "AbortError"
+          ) {
+            setError("Unable to load activity. Please try again.");
+          }
+        } finally {
+          if (!controller.signal.aborted) setIsLoading(false);
+        }
+      }
+
+      void loadActivity();
+      return () => controller.abort();
+    }, [isSessionPending, session?.user.id]),
+  );
+
+  const sections = useMemo(() => {
+    const grouped = new Map<string, ActivityItem[]>();
+    for (const item of activity) {
+      const title = sectionTitle(item.timestamp);
+      grouped.set(title, [...(grouped.get(title) ?? []), item]);
+    }
+    return [...grouped].map(([title, data]) => ({ title, data }));
+  }, [activity]);
+
   return (
     <View style={styles.outer}>
       <View style={styles.screen}>
@@ -253,12 +287,16 @@ export default function ActivityFeedScreen({
         <SafeAreaView style={styles.safeArea}>
           <Header />
           <SectionList
-            sections={ACTIVITY_SECTIONS}
-            keyExtractor={(item) => item.id}
+            sections={sections}
+            keyExtractor={(item) => `${item.type}-${item.id}`}
             renderItem={({ item }) => (
               <ActivityCard
                 item={item}
-                onPress={() => onOpenExpense?.(item.id)}
+                onPress={
+                  item.type === "expense"
+                    ? () => onOpenExpense?.(item.groupId, item.id)
+                    : undefined
+                }
               />
             )}
             renderSectionHeader={({ section }) => (
@@ -268,7 +306,21 @@ export default function ActivityFeedScreen({
             SectionSeparatorComponent={() => (
               <View style={styles.sectionGap} />
             )}
-            ListFooterComponent={
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                {isLoading ? (
+                  <>
+                    <ActivityIndicator color={COLORS.yellow} size="large" />
+                    <Text style={styles.listEndText}>Loading activity…</Text>
+                  </>
+                ) : (
+                  <Text style={[styles.listEndText, error && styles.errorText]}>
+                    {error ?? "No activity yet."}
+                  </Text>
+                )}
+              </View>
+            }
+            ListFooterComponent={activity.length > 0 ? (
               <View style={styles.listEnd}>
                 <MaterialIcons
                   name="history"
@@ -279,7 +331,7 @@ export default function ActivityFeedScreen({
                   That&apos;s everything for now.
                 </Text>
               </View>
-            }
+            ) : null}
             stickySectionHeadersEnabled={false}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.feedContent}
@@ -409,6 +461,15 @@ const styles = StyleSheet.create({
     paddingVertical: 48,
     alignItems: "center",
     justifyContent: "center",
+  },
+  emptyState: {
+    minHeight: 260,
+    alignItems: "center",
+    justifyContent: "center",
+    rowGap: 12,
+  },
+  errorText: {
+    color: "#FFB4AB",
   },
   listEndText: {
     color: COLORS.muted,
